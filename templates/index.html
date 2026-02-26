@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cover Story Solver</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+
+<body>
+    <div class="container">
+        <h1>Cover Story Solver</h1>
+
+        <section id="upload-section">
+            <label for="file-upload" class="custom-file-upload">
+                Upload Screenshot
+            </label>
+            <input id="file-upload" type="file" accept="image/*" />
+        </section>
+
+        <section id="verification-section" style="display:none;">
+            <h2>Verify Detected Grid</h2>
+            <p>Click a cell to cycle through colors if the detection was incorrect (Orange, Green, Yellow, Blue,
+                Background).</p>
+            <div id="status-message"></div>
+            <div id="grid-container"></div>
+            <div id="piece-info">Detected 0 pieces</div>
+            <div id="pieces-preview" class="pieces-list"></div>
+            <div class="controls">
+                <button id="solve-btn" class="primary-btn">Solve Puzzle</button>
+                <button id="hint-btn">Give Hint</button>
+                <button id="reset-btn">Reset</button>
+            </div>
+        </section>
+
+        <section id="solution-section" style="display:none;">
+            <h2>Solution</h2>
+            <div class="canvas-wrapper">
+                <canvas id="solution-canvas"></canvas>
+            </div>
+            <button onclick="location.reload()">New Puzzle</button>
+        </section>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+
+</html>
