@@ -9,83 +9,138 @@ class CVEngine:
 
     def detect_grid(self, img: np.ndarray) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
         """
-        Detects the 5x5 board in the screenshot.
+        Detects the 5x5 board in the screenshot by finding the centers of colored circles.
         Returns the cropped board image and its (x, y, w, h) coordinates.
         """
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        blur = cv2.GaussianBlur(gray, (5, 5), 0)
+        blur = cv2.GaussianBlur(gray, (7, 7), 0)
         thresh = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
+        
+        # Join gaps in circle outlines
+        kernel = np.ones((5, 5), np.uint8)
+        thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel, iterations=2)
         cv2.imwrite("thresh_debug.jpg", thresh)
         
-        contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         height, width = img.shape[:2]
-        board_contour = None
-        max_area = 0
         
+        # 1. Find all circle-ish candidates (the colored dots)
+        candidates = []
         for cnt in contours:
             area = cv2.contourArea(cnt)
-            if area < 5000: continue # Ignore very small noise
-            
-            x, y, w, h = cv2.boundingRect(cnt)
-            aspect_ratio = float(w)/h
-            
-            # The board area (800x800) is ~640k. 
-            # A single cell (160x160) is ~25k.
-            # We are looking for the total board area.
-            if 0.8 <= aspect_ratio <= 1.2 and area > 100000 and y < height * 0.5:
-                # This is likely the board!
-                if area > max_area:
-                    max_area = area
-                    board_contour = (x, y, w, h)
-                    print(f"Found Board Candidate: {board_contour} area={area}")
+            if 500 < area < 15000:
+                x, y, w, h = cv2.boundingRect(cnt)
+                if 0.7 <= float(w)/h <= 1.3:
+                    # In the top 70% of the screen
+                    if height * 0.1 < y < height * 0.7:
+                        candidates.append((x + w//2, y + h//2, w, h))
+
+        print(f"DEBUG: Found {len(candidates)} potential dot candidates.")
+
+        # 2. Group into rows
+        candidates.sort(key=lambda c: c[1])
+        rows = []
+        if candidates:
+            curr_row = [candidates[0]]
+            for i in range(1, len(candidates)):
+                if candidates[i][1] - curr_row[-1][1] < candidates[i][3] * 0.7:
+                    curr_row.append(candidates[i])
+                else:
+                    if len(curr_row) >= 3:
+                        rows.append(sorted(curr_row, key=lambda r: r[0]))
+                    curr_row = [candidates[i]]
+            if len(curr_row) >= 3:
+                rows.append(sorted(curr_row, key=lambda r: r[0]))
+
+        print(f"DEBUG: Grouped into {len(rows)} potential rows.")
         
-        # Fallback: if no clear square board found, use the top half of the main container
-        if not board_contour:
-             # Find the large container again (from previous logs we know it's around 800x1200)
-             for cnt in contours:
-                area = cv2.contourArea(cnt)
-                if area > 500000:
-                    x, y, w, h = cv2.boundingRect(cnt)
-                    if y < height * 0.4:
-                        # Estimate board as a square at the top of this container
-                        board_contour = (x, y, w, w) # Use width as height for squareness
-                        print(f"Fallback Board (using container top): {board_contour}")
-                        break
+        # 3. Find 5 rows that form the grid
+        best_rows = []
+        for i in range(len(rows) - 4):
+            candidate_rows = rows[i:i+5]
+            if all(4 <= len(r) <= 12 for r in candidate_rows):
+                best_rows = candidate_rows
+                break
         
-        if board_contour:
-            x, y, w, h = board_contour
-            return img[y:y+h, x:x+w], board_contour
+        if not best_rows and len(rows) >= 5:
+            # Try to find any 5 rows with ~5-10 elements
+            potentials = [r for r in rows if 4 <= len(r) <= 12]
+            if len(potentials) >= 5:
+                # Prioritize top 5 rows
+                best_rows = potentials[:5]
+
+        if best_rows:
+            all_dots = []
+            for r in best_rows:
+                # Deduplicate dots in the same row that are too close (X distance < dot_width/2)
+                row_dots = []
+                if r:
+                    row_dots.append(r[0])
+                    for d in r[1:]:
+                        if d[0] - row_dots[-1][0] > d[2] // 2:
+                            row_dots.append(d)
+                all_dots.extend(row_dots)
+            
+            if len(all_dots) < 15:
+                return None, None
+
+            min_x = min(d[0] - d[2] for d in all_dots)
+            max_x = max(d[0] + d[2] for d in all_dots)
+            min_y = min(d[1] - d[3] for d in all_dots)
+            max_y = max(d[1] + d[3] for d in all_dots)
+            
+            # Add margin for the pale square background (approx one cell width)
+            # The distance between dots is ~160px.
+            pitch = (max_x - min_x) // 4 if len(best_rows[0]) > 1 else 100
+            
+            x1, y1 = max(0, min_x - int(pitch*0.6)), max(0, min_y - int(pitch*0.6))
+            x2, y2 = min(width, max_x + int(pitch*0.6)), min(height, max_y + int(pitch*0.6))
+            
+            board_rect = (x1, y1, x2-x1, y2-y1)
+            print(f"Detected 5x5 board via dot structure: {board_rect}")
+            # Save for debugging in the engine instance
+            self.debug_dots = [(d[0], d[1]) for d in all_dots]
+            return img[y1:y2, x1:x2], board_rect
+
         return None, None
 
-    def classify_colors(self, board_img: np.ndarray, k: int = 5) -> Tuple[np.ndarray, List[List[int]]]:
+        return None, None
+
+    def classify_colors(self, img: np.ndarray, k: int = 5) -> Tuple[np.ndarray, List[List[int]]]:
         """
-        Uses K-Means to identify colors on the 5x5 grid.
+        Uses K-Means to identify colors using the pre-detected dot centers.
         Returns (labels_grid, cluster_centers_bgr)
         """
-        h, w = board_img.shape[:2]
-        cell_h, cell_w = h // 5, w // 5
-        
-        grid_data = []
         cell_centers = []
         
-        for r in range(5):
-            row = []
-            for c in range(5):
-                # Extract the center of the cell to avoid borders
-                y1, y2 = r * cell_h + cell_h // 4, (r + 1) * cell_h - cell_h // 4
-                x1, x2 = c * cell_w + cell_w // 4, (c + 1) * cell_w - cell_w // 4
-                cell_roi = board_img[y1:y2, x1:x2]
-                
-                # Average color of the cell center
-                avg_color = cv2.mean(cell_roi)[:3]
+        # If we have pre-detected dots, sample them directly from the ORIGINAL image
+        if hasattr(self, 'debug_dots') and len(self.debug_dots) == 25:
+            for dx, dy in self.debug_dots:
+                # Sample a tiny 5x5 area around the center of the dot
+                x1, x2 = max(0, dx - 5), min(img.shape[1], dx + 6)
+                y1, y2 = max(0, dy - 5), min(img.shape[0], dy + 6)
+                roi = img[y1:y2, x1:x2]
+                if roi.size == 0:
+                    avg_color = [255, 255, 255]
+                else:
+                    avg_color = cv2.mean(roi)[:3]
                 cell_centers.append(avg_color)
-                row.append(avg_color)
-            grid_data.append(row)
+        else:
+            # Fallback to board-img grid sampling (should not happen with good detection)
+            # This part remains mostly for safety or older code versions.
+            h, w = img.shape[:2]
+            cell_h, cell_w = h // 5, w // 5
+            for r in range(5):
+                for c in range(5):
+                    y1, y2 = r * cell_h + int(cell_h * 0.35), (r + 1) * cell_h - int(cell_h * 0.35)
+                    x1, x2 = c * cell_w + int(cell_w * 0.35), (c + 1) * cell_w - int(cell_w * 0.35)
+                    roi = img[y1:y2, x1:x2]
+                    avg_color = cv2.mean(roi)[:3] if roi.size > 0 else [255, 255, 255]
+                    cell_centers.append(avg_color)
             
         # Cluster the 25 average colors into K clusters
         cell_centers_np = np.array(cell_centers, dtype=np.float32)
-        kmeans = KMeans(n_clusters=k, random_state=0).fit(cell_centers_np)
+        kmeans = KMeans(n_clusters=k, n_init=10, random_state=0).fit(cell_centers_np)
         labels = kmeans.labels_
         
         # Convert cluster centers to standard Python ints [B, G, R]
@@ -210,8 +265,8 @@ class CVEngine:
                         x1, x2 = c_start + int(cb * cw), c_start + int((cb+1) * cw)
                         # Check occupancy on the raw (un-dilated) mask for precision
                         cell = mask[y1:y2, x1:x2]
-                        # 50% occupancy is very safe
-                        if cell.size > 0 and np.sum(cell) > (cell.size * 255 * 0.5):
+                        # 40% occupancy is safer for smaller blocks
+                        if cell.size > 0 and np.sum(cell) > (cell.size * 255 * 0.4):
                             square_centers.append((r_start + int((rb+0.5)*ch), c_start + int((cb+0.5)*cw)))
         
         print(f"Collected {len(square_centers)} square centers.")
@@ -267,7 +322,7 @@ def process_screenshot(img_path: str):
         return None
     
     print("Classifying colors...")
-    grid, cluster_colors = engine.classify_colors(board_img)
+    grid, cluster_colors = engine.classify_colors(img)
     print("Extracting pieces...")
     pieces = engine.extract_pieces(img, board_rect)
     
@@ -275,5 +330,6 @@ def process_screenshot(img_path: str):
         "grid": grid,
         "cluster_colors": cluster_colors,
         "pieces": pieces,
-        "board_rect": board_rect
+        "board_rect": board_rect,
+        "debug_dots": getattr(engine, 'debug_dots', [])
     }

@@ -10,7 +10,7 @@ Also each piece cannot cover the same collor twice. That is, if we have a piece 
 
 ## Game input
 The game is uploaded as a screenshot of the game, with the board and the pieces.
-See file `cover_story_screen.jpeg` for an example.
+See file `cover_story_1.jpeg` for an example.
 The user should be shown an image of the identified grid and pices highlighted in a way that allows him/her to check that the image processing went well.
 (we may elimintate this step if we find image processing is mostly fine)
 
@@ -27,4 +27,13 @@ FE - React
 BE - Google App Engine (Python)
 
 Similar to the ~/repos/tellem project
+
+## Test plan
+we have now are `cover_story_*.jpeg` files. Please write a set of tests that check the coed fore each of this files and creates a regresssion data that is compared. The regression data can be keyed/named by jpeg file name. during test. tests to write (for all jpeg files)
+1. finding bounding box of 5*5 grid (and comparing to regression output)
+2. finding the number of colors in the dots (and comparing to regression data)
+3. finding the actual colors and their mappring to the 5*5 grid (+ regression)
+4. Finding the pices layout and checking they sum to 25. (+regression)
+5. solving the puzzle and comparing to regression solution.
+
 
